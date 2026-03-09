@@ -13,7 +13,8 @@ model User {
   code                       String
   codeClair                  String?
   nomComplet                 String
-  adresse                    String
+  adresse                    String?
+
   photo                      String?
   role                       UserRole
   status                     UserStatus            @default(ACTIVE)
@@ -94,6 +95,7 @@ model Transaction {
   destinataireId      String?
   partenaireId        String?
   partenaireNom       String?
+  telephoneLibre  String?
   compteOrigineId     String?
   compteDestinationId String?
   isValidated         Boolean         @default(true)
@@ -195,11 +197,26 @@ enum TransactionType {
   AUDIT_SUPPRESSION
 }
 
+// ══════════════════════════════════════════════
+// ENUM MIS À JOUR — migration requise :
+//   npx prisma migrate dev --name add_new_account_types
+//
+// Nouveaux types : FREE_MONEY, WESTERN_UNION, RIA, MONEYGRAM
+// AUTRES conservé pour compatibilité données existantes
+//
+// L'admin active/désactive les types visibles via SystemConfig :
+//   key = "active_account_types" → '["LIQUIDE","WAVE","FREE_MONEY"]'
+//   key = "autres_label"         → "Tigo Cash"  (nom perso pour AUTRES)
+// ══════════════════════════════════════════════
 enum AccountType {
   LIQUIDE
   ORANGE_MONEY
   WAVE
   UV_MASTER
+  FREE_MONEY
+  WESTERN_UNION
+  RIA
+  MONEYGRAM
   AUTRES
 }
 

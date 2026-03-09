@@ -1,4 +1,4 @@
-// scripts/createAdmin.js
+
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 
@@ -6,76 +6,45 @@ const prisma = new PrismaClient();
 
 async function createDefaultAdmin() {
   try {
-    console.log('🔧 Création de l\'administrateur par défaut SBK...');
-    console.log('='.repeat(60));
+    console.log('🔧 Création administrateur SBK...');
 
-    // Vérifier si un admin existe déjà
     const existingAdmin = await prisma.user.findFirst({
       where: { role: 'ADMIN' }
     });
 
     if (existingAdmin) {
-      console.log('❌ Un administrateur existe déjà dans la base de données');
-      console.log(`📱 Téléphone existant: ${existingAdmin.telephone}`);
+      console.log('❌ Admin existe déjà');
+      console.log(`📱 Téléphone: ${existingAdmin.telephone}`);
       console.log(`👤 Nom: ${existingAdmin.nomComplet}`);
-      console.log('💡 Utilisez ces informations pour vous connecter');
       return;
     }
 
-    // Données admin par défaut
-    const adminData = {
-      telephone: '775261930',
-      code: '123456', // Code par défaut
-      nomComplet: 'Administrateur SBK',
-      adresse: 'Kolda, Sénégal',
-      role: 'ADMIN'
-    };
+    const code = '111111';
+    const hashedCode = await bcrypt.hash(code, 12);
 
-    // Hasher le code d'accès
-    const hashedCode = await bcrypt.hash(adminData.code, 12);
-
-    // Créer l'administrateur
     const admin = await prisma.user.create({
       data: {
-        telephone: adminData.telephone,
-        nomComplet: adminData.nomComplet,
+        telephone: '776618703',
+        nomComplet: 'Administrateur SBK',
         code: hashedCode,
-        role: adminData.role,
+        role: 'ADMIN',
         status: 'ACTIVE',
-        adresse: adminData.adresse
+        adresse: 'Kolda, Sénégal'
       }
     });
 
-    console.log('✅ Administrateur créé avec succès !');
-    console.log('='.repeat(60));
-    console.log('🏢 INFORMATIONS DE CONNEXION ADMINISTRATEUR');
-    console.log('='.repeat(60));
+    console.log('✅ Admin créé avec succès !');
     console.log(`📱 Téléphone: ${admin.telephone}`);
-    console.log(`🔑 Code d'accès: ${adminData.code}`);
-    console.log(`👤 Nom: ${admin.nomComplet}`);
-    console.log(`🏢 Rôle: ${admin.role}`);
-    console.log(`📍 Adresse: ${admin.adresse}`);
-    console.log('='.repeat(60));
-    console.log('💡 Conservez ces informations pour vous connecter');
-    console.log('🚀 Vous pouvez maintenant démarrer le serveur: npm run dev');
+    console.log(`🔑 Code: ${code}`);
 
   } catch (error) {
-    console.error('❌ Erreur lors de la création de l\'administrateur:', error);
-    
+    console.error('❌ Erreur:', error.message);
     if (error.code === 'P2002') {
-      console.log('📱 Le numéro de téléphone est déjà utilisé');
-    } else {
-      console.log('🔧 Vérifiez votre configuration de base de données');
+      console.log('📱 Numéro déjà utilisé');
     }
   } finally {
     await prisma.$disconnect();
-    console.log('🔌 Connexion base de données fermée');
   }
 }
 
-// Exécuter si appelé directement
-if (import.meta.url === `file://${process.argv[1]}`) {
-  createDefaultAdmin();
-}
-
-export default createDefaultAdmin;
+createDefaultAdmin();

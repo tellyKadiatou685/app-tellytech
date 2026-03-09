@@ -18,193 +18,71 @@ import {
 const router = express.Router();
 
 // =====================================
-// ROUTES PUBLIQUES (pas d'authentification)
+// ROUTES PUBLIQUES
 // =====================================
 
-// 🔐 Connexion
-router.post('/login', 
-  validateLogin, 
-  handleValidationErrors, 
-  UserController.login
-);
-
-// 📝 Demande d'inscription partenaire (public)
-router.post('/register-request', 
-  validateRegistration, 
-  handleValidationErrors, 
-  UserController.requestRegistration
-);
+router.post('/login', validateLogin, handleValidationErrors, UserController.login);
+router.post('/register-request', validateRegistration, handleValidationErrors, UserController.requestRegistration);
 
 // =====================================
-// ROUTES AUTHENTIFIÉES (toutes nécessitent un token)
+// ROUTES AUTHENTIFIÉES (tous les rôles)
 // =====================================
 
-// 🚪 Déconnexion
-router.post('/logout', 
-  authenticateToken, 
-  UserController.logout
-);
+router.post('/logout', authenticateToken, UserController.logout);
+router.get('/profile',  authenticateToken, UserController.getProfile);
 
-// 👤 Profil utilisateur connecté
-router.get('/profile', 
-  authenticateToken, 
-  UserController.getProfile
-);
-
+// ✏️ Mise à jour profil — nom, téléphone, adresse, photo (sauf code)
+router.patch('/profile', authenticateToken, UserController.updateProfile);
 
 // =====================================
-// NOTIFICATIONS (tous les rôles)
-// =====================================
-router.get('/partners', 
-  authenticateToken, 
-  requireSupervisorOrAdmin, 
-  UserController.getPartners
-);
-// 🔔 Mes notifications
-router.get('/notifications', 
-  authenticateToken, 
-  UserController.getNotifications
-);
-
-router.get('/partners', 
-  authenticateToken, 
-  requireSupervisorOrAdmin, 
-  UserController.getPartners
-);
-
-// ✅ Marquer notification comme lue
-router.patch('/notifications/:notificationId/read', 
-  authenticateToken, 
-  UserController.markNotificationRead
-);
-
-// =====================================
-// ROUTES ADMIN SEULEMENT
+// NOTIFICATIONS
 // =====================================
 
-// 📋 Demandes d'inscription en attente
-router.get('/registration-requests', 
-  authenticateToken, 
-  requireAdmin, 
-  UserController.getPendingRegistrations
-);
-
-// ✅ Approuver demande d'inscription
-router.patch('/registration-requests/:requestId/approve', 
-  authenticateToken, 
-  requireAdmin, 
-  UserController.approveRegistration
-);
-
-// ❌ Rejeter demande d'inscription
-router.patch('/registration-requests/:requestId/reject', 
-  authenticateToken, 
-  requireAdmin, 
-  UserController.rejectRegistration
-);
-
-// 👥 Créer utilisateur directement
-router.post('/create', 
-  authenticateToken, 
-  requireAdmin, 
-  validateCreateUser, 
-  handleValidationErrors, 
-  UserController.createUser
-);
-
-// 👥 Liste de tous les utilisateurs
-router.get('/all', 
-  authenticateToken, 
-  requireAdmin, 
-  UserController.getAllUsers
-);
-
-// ⏸️ Suspendre utilisateur
-router.patch('/:userId/suspend', 
-  authenticateToken, 
-  requireAdmin, 
-  UserController.suspendUser
-);
-
-// ▶️ Réactiver utilisateur
-router.patch('/:userId/activate', 
-  authenticateToken, 
-  requireAdmin, 
-  UserController.activateUser
-);
-
-// 🗑️ Supprimer utilisateur
-router.delete('/:userId', 
-  authenticateToken, 
-  requireAdmin, 
-  UserController.deleteUser
-);
-
-// 📢 Diffuser notification à tous les utilisateurs d'un rôle
-router.post('/broadcast-notification', 
-  authenticateToken, 
-  requireAdmin, 
-  UserController.broadcastNotification
-);
+router.get('/notifications', authenticateToken, UserController.getNotifications);
+router.patch('/notifications/:notificationId/read', authenticateToken, UserController.markNotificationRead);
 
 // =====================================
-// ROUTES SUPERVISEUR + ADMIN
+// SUPERVISEUR + ADMIN
 // =====================================
 
-// Exemple de route nécessitant superviseur OU admin
-// router.get('/supervisors-only', 
-//   authenticateToken, 
-//   requireSupervisorOrAdmin, 
-//   UserController.someMethodForSupervisorsAndAdmins
-// );
+router.get('/partners', authenticateToken, requireSupervisorOrAdmin, UserController.getPartners);
 
 // =====================================
-// ROUTES PARTENAIRE SEULEMENT
+// ADMIN SEULEMENT
 // =====================================
 
-// Exemple de routes réservées aux partenaires
-// router.get('/partner-specific', 
-//   authenticateToken, 
-//   requirePartner, 
-//   UserController.someMethodForPartnersOnly
-// );
+router.get('/registration-requests',                        authenticateToken, requireAdmin, UserController.getPendingRegistrations);
+router.patch('/registration-requests/:requestId/approve',   authenticateToken, requireAdmin, UserController.approveRegistration);
+router.patch('/registration-requests/:requestId/reject',    authenticateToken, requireAdmin, UserController.rejectRegistration);
+router.post('/create',                                      authenticateToken, requireAdmin, validateCreateUser, handleValidationErrors, UserController.createUser);
+router.get('/all',                                          authenticateToken, requireAdmin, UserController.getAllUsers);
+router.patch('/:userId/suspend',                            authenticateToken, requireAdmin, UserController.suspendUser);
+router.patch('/:userId/activate',                           authenticateToken, requireAdmin, UserController.activateUser);
+router.delete('/:userId',                                   authenticateToken, requireAdmin, UserController.deleteUser);
+router.post('/broadcast-notification',                      authenticateToken, requireAdmin, UserController.broadcastNotification);
+
+// Codes d'accès
+router.get('/:userId/code',            authenticateToken, requireAdmin, UserController.getUserCode);
+router.post('/:userId/regenerate-code',authenticateToken, requireAdmin, UserController.regenerateUserCode);
+router.get('/codes/stats',             authenticateToken, requireAdmin, UserController.getCodesStats);
+router.get('/codes/search',            authenticateToken, requireAdmin, UserController.findUserByCode);
 
 // =====================================
-// MIDDLEWARE DE GESTION D'ERREURS SPÉCIFIQUE AUX ROUTES USERS
+// GESTION D'ERREURS
 // =====================================
 
-// Gestion d'erreurs pour les routes utilisateurs
 router.use((error, req, res, next) => {
   console.error('❌ Erreur dans userRoutes:', error);
-  
-  // Erreurs de validation Prisma
   if (error.code === 'P2002') {
-    return res.status(409).json({
-      success: false,
-      message: 'Conflit: cette donnée existe déjà (probablement numéro de téléphone)'
-    });
+    return res.status(409).json({ success: false, message: 'Ce numéro de téléphone est déjà utilisé' });
   }
-  
-  // Erreurs de token JWT
   if (error.name === 'JsonWebTokenError') {
-    return res.status(401).json({
-      success: false,
-      message: 'Token invalide. Veuillez vous reconnecter.'
-    });
+    return res.status(401).json({ success: false, message: 'Token invalide. Veuillez vous reconnecter.' });
   }
-  
   if (error.name === 'TokenExpiredError') {
-    return res.status(401).json({
-      success: false,
-      message: 'Votre session a expiré. Veuillez vous reconnecter.'
-    });
+    return res.status(401).json({ success: false, message: 'Session expirée. Veuillez vous reconnecter.' });
   }
-  
-  // Erreur générique
-  res.status(500).json({
-    success: false,
-    message: 'Erreur interne du serveur'
-  });
+  res.status(500).json({ success: false, message: 'Erreur interne du serveur' });
 });
 
 export default router;

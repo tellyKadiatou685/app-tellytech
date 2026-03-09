@@ -10,7 +10,9 @@ import userRoutes from './routes/userRoutes.js';
 import TransactionRoute from './routes/transactionRoutes.js';
 import RecentTransactionRoutes from './routes/recentTransactionRoutes.js';
 import AccountLines from './routes/accountLines.js';
+import AccountTypes from './routes/accoutTypeRoutes.js';
 import cronHandler from '../api/cron.js';
+import partner from './routes/partnerBalanceRoutes.js';
 
 
 const app = express();
@@ -24,7 +26,7 @@ const corsOptions = {
     const devOrigins = [
       'http://localhost:5173',
       'http://localhost:3000',
-      'http://localhost:8080',
+      'http://localhost:8082',
       'http://localhost:8081',
       'http://172.20.10.2:8082'
     ];
@@ -177,6 +179,9 @@ app.use('/api/users', userRoutes);
 app.use('/api/transactions', TransactionRoute);
 app.use('/api/recent', RecentTransactionRoutes);
 app.use('/api/account-lines', AccountLines);
+app.use('/api/accountype',  AccountTypes);  
+app.use('/api/partner-balance', partner);
+ 
 
 // Route de test auth
 app.get('/api/test-auth', (req, res) => {

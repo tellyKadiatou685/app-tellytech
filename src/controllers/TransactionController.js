@@ -11,23 +11,15 @@ class TransactionController {
   async getDashboard(req, res) {
     try {
       const user = req.user;
-      // CORRECTION: Utiliser 'date' au lieu de 'datetime' pour correspondre à l'URL
       const { period = 'today', date } = req.query;
   
-      // Validation si date personnalisée
       if (period === 'custom' && date) {
         const validation = TransactionService.validateCustomDateTime(date);
         if (!validation.valid) {
-          return res.status(400).json({
-            success: false,
-            message: validation.error
-          });
+          return res.status(400).json({ success: false, message: validation.error });
         }
       }
   
-      let dashboardData;
-  
-      // Switch optimisé avec support date
       const dashboardPromise = (() => {
         switch (user.role) {
           case 'ADMIN':
@@ -52,7 +44,7 @@ class TransactionController {
         }
       })();
   
-      dashboardData = await dashboardPromise;
+      const dashboardData = await dashboardPromise;
   
       res.json({
         success: true,
@@ -77,28 +69,20 @@ class TransactionController {
   async getAdminDashboard(req, res) {
     try {
       if (req.user.role !== 'ADMIN') {
-        return res.status(403).json({
-          success: false,
-          message: 'Accès réservé aux administrateurs'
-        });
+        return res.status(403).json({ success: false, message: 'Accès réservé aux administrateurs' });
       }
   
       const { period = 'today', date } = req.query;
   
       console.log('📊 [CONTROLLER] getAdminDashboard appelé:', { period, date });
   
-      // Validation si date personnalisée
       if (period === 'custom' && date) {
         const validation = TransactionService.validateCustomDateTime(date);
         if (!validation.valid) {
-          return res.status(400).json({
-            success: false,
-            message: validation.error
-          });
+          return res.status(400).json({ success: false, message: validation.error });
         }
       }
   
-      // Appel au service
       const dashboardData = await TransactionService.getAdminDashboard(
         period === 'custom' ? 'custom' : period,
         period === 'custom' ? date : null
@@ -110,7 +94,6 @@ class TransactionController {
         supervisorCount: dashboardData.supervisorCards?.length
       });
   
-      // CORRECTION: Retourner directement les données du service
       res.json({
         success: true,
         message: 'Dashboard administrateur récupéré',
@@ -131,54 +114,83 @@ class TransactionController {
     }
   }
   
- // 👤 Dashboard superviseur spécifique
-async getSupervisorDashboard(req, res) {
-  try {
-    const supervisorId = req.params.supervisorId || req.user.id;
-    const { period = 'today', date } = req.query; // Support des dates personnalisées
-
-    // Vérification des permissions
-    if (req.user.role !== 'ADMIN' && req.user.id !== supervisorId) {
-      return res.status(403).json({
-        success: false,
-        message: 'Vous ne pouvez voir que votre propre dashboard'
+  async getSupervisorDashboard(req, res) {
+    try {
+      const supervisorId = req.params.supervisorId || req.user.id;
+      const { period = 'today', date } = req.query;
+  
+      console.log('🔍 [SUPERVISOR DASHBOARD] Params:', {
+        supervisorId,
+        period,
+        date,
+        userId: req.user.id,
+        userRole: req.user.role
       });
-    }
-
-    // Validation si date personnalisée
-    if (period === 'custom' && date) {
-      const validation = TransactionService.validateCustomDateTime(date);
-      if (!validation.valid) {
-        return res.status(400).json({
+  
+      if (req.user.role !== 'ADMIN' && req.user.id !== supervisorId) {
+        return res.status(403).json({
           success: false,
-          message: validation.error
+          message: 'Vous ne pouvez voir que votre propre dashboard'
         });
       }
-    }
-
-    const dashboardData = await TransactionService.getSupervisorDashboard(
-      supervisorId, 
-      period === 'custom' ? 'custom' : period,
-      period === 'custom' ? date : null // Paramètre customDate
-    );
-
-    res.json({
-      success: true,
-      message: 'Dashboard superviseur récupéré',
-      data: {
-        ...dashboardData,
-        customDate: period === 'custom' ? date : null
+  
+      if (period === 'custom' && date) {
+        const validation = TransactionService.validateCustomDateTime(date);
+        if (!validation.valid) {
+          return res.status(400).json({ success: false, message: validation.error });
+        }
       }
-    });
-
-  } catch (error) {
-    console.error('❌ [OPTIMIZED] Erreur getSupervisorDashboard:', error);
-    res.status(500).json({
-      success: false,
-      message: error.message || 'Erreur lors de la récupération du dashboard superviseur'
-    });
+  
+      console.log('🔍 [SUPERVISOR DASHBOARD] Appel service avec:', supervisorId, period);
+  
+      const dashboardData = await TransactionService.getSupervisorDashboard(
+        supervisorId,
+        period === 'custom' ? 'custom' : period,
+        period === 'custom' ? date : null
+      );
+  
+      console.log('✅ [SUPERVISOR DASHBOARD] Données reçues:', {
+        superviseur: dashboardData?.superviseur,
+        totalTransactions: dashboardData?.recentTransactions?.length,
+        comptes: Object.keys(dashboardData?.comptes?.debut || {})
+      });
+  
+      res.json({
+        success: true,
+        message: 'Dashboard superviseur récupéré',
+        data: {
+          dashboard: dashboardData,
+          customDate: period === 'custom' ? date : null
+        }
+      });
+  
+    } catch (error) {
+      console.error('❌ [SUPERVISOR DASHBOARD] Erreur complète:', {
+        message: error.message,
+        stack: error.stack,
+        supervisorId: req.params.supervisorId || req.user?.id
+      });
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Erreur lors de la récupération du dashboard superviseur',
+        debug: error.stack  // ← temporaire pour voir l'erreur exacte
+      });
+    }
   }
-}
+
+  async getSupervisors(req, res) {
+    try {
+      const supervisors = await prisma.user.findMany({
+        where: { role: 'SUPERVISEUR', status: 'ACTIVE' },
+        select: { id: true, nomComplet: true, telephone: true, photo: true },
+        orderBy: { nomComplet: 'asc' },
+      });
+      res.json({ success: true, data: supervisors });
+    } catch (error) {
+      console.error('❌ getSupervisors:', error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  }
 
   // 🤝 DASHBOARD PARTENAIRE SPÉCIFIQUE
   async getPartnerDashboard(req, res) {
@@ -187,19 +199,12 @@ async getSupervisorDashboard(req, res) {
       const { period = 'today' } = req.query;
 
       if (req.user.role !== 'PARTENAIRE') {
-        return res.status(403).json({
-          success: false,
-          message: 'Accès réservé aux partenaires'
-        });
+        return res.status(403).json({ success: false, message: 'Accès réservé aux partenaires' });
       }
 
       const dashboardData = await TransactionService.getPartnerDashboard(partnerId, period);
 
-      res.json({
-        success: true,
-        message: 'Dashboard partenaire récupéré',
-        data: dashboardData
-      });
+      res.json({ success: true, message: 'Dashboard partenaire récupéré', data: dashboardData });
 
     } catch (error) {
       console.error('❌ [OPTIMIZED] Erreur getPartnerDashboard:', error);
@@ -214,31 +219,22 @@ async getSupervisorDashboard(req, res) {
   // CRÉATION DE TRANSACTIONS - OPTIMISÉES
   // =====================================
 
-  // ⚡ TRANSACTION UNIVERSELLE (admin/superviseur/partenaire)
   async createTransaction(req, res) {
     try {
       const user = req.user;
       const transactionData = req.body;
 
-      // ✅ VALIDATION PRÉCOCE ET CONVERSION SÉCURISÉE
       if (!transactionData.montant) {
-        return res.status(400).json({
-          success: false,
-          message: 'Montant requis'
-        });
+        return res.status(400).json({ success: false, message: 'Montant requis' });
       }
 
       const montantFloat = parseFloat(transactionData.montant);
       if (isNaN(montantFloat) || montantFloat <= 0) {
-        return res.status(400).json({
-          success: false,
-          message: 'Montant invalide'
-        });
+        return res.status(400).json({ success: false, message: 'Montant invalide' });
       }
 
       transactionData.montant = montantFloat;
 
-      // ✅ SWITCH OPTIMISÉ AVEC PROMISE
       const transactionPromise = (() => {
         switch (user.role) {
           case 'ADMIN':
@@ -254,11 +250,7 @@ async getSupervisorDashboard(req, res) {
 
       const result = await transactionPromise;
 
-      res.status(201).json({
-        success: true,
-        message: 'Transaction créée avec succès',
-       
-      });
+      res.status(201).json({ success: true, message: 'Transaction créée avec succès' });
 
     } catch (error) {
       console.error('❌ [OPTIMIZED] Erreur createTransaction:', error);
@@ -269,159 +261,139 @@ async getSupervisorDashboard(req, res) {
     }
   }
 
-  // 💰 TRANSACTION ADMIN - VERSION ULTRA OPTIMISÉE// 💰 TRANSACTION ADMIN - VERSION CORRIGÉE POUR PARTENAIRES
-// 💰 TRANSACTION ADMIN - VERSION COMPLÈTE AVEC PARTENAIRE LIBRE
-async createAdminTransaction(req, res) {
-  try {
-    if (req.user.role !== 'ADMIN') {
-      return res.status(403).json({
-        success: false,
-        message: 'Accès réservé aux administrateurs'
+  // 💰 TRANSACTION ADMIN - VERSION COMPLÈTE AVEC PARTENAIRE LIBRE + TÉLÉPHONE
+  async createAdminTransaction(req, res) {
+    try {
+      if (req.user.role !== 'ADMIN') {
+        return res.status(403).json({ success: false, message: 'Accès réservé aux administrateurs' });
+      }
+
+      const adminId = req.user.id;
+      const { 
+        superviseurId, 
+        typeCompte, 
+        typeOperation, 
+        montant, 
+        partenaireId,
+        partenaireNom,
+        telephoneLibre    // ← NOUVEAU : optionnel, partenaire libre seulement
+      } = req.body;
+
+      console.log('🔍 [CONTROLLER] Données reçues:', {
+        superviseurId, typeCompte, typeOperation, montant,
+        partenaireId, partenaireNom, telephoneLibre,
+        hasPartenaireNom: !!partenaireNom
       });
-    }
 
-    const adminId = req.user.id;
-    const { 
-      superviseurId, 
-      typeCompte, 
-      typeOperation, 
-      montant, 
-      partenaireId,
-      partenaireNom
-    } = req.body;
-
-    console.log('🔍 [CONTROLLER] Données reçues:', {
-      superviseurId,
-      typeCompte,
-      typeOperation,
-      montant,
-      partenaireId,
-      partenaireNom,
-      hasPartenaireNom: !!partenaireNom
-    });
-
-    // Validation
-    const validationErrors = [];
-    
-    if (!superviseurId) validationErrors.push('superviseurId requis');
-    
-    const hasPartenaireId = !!partenaireId;
-    const hasPartenaireNom = !!partenaireNom;
-    const isPartnerTransaction = hasPartenaireId || hasPartenaireNom;
-    
-    if (!isPartnerTransaction && !typeCompte) {
-      validationErrors.push('typeCompte requis pour transactions début/fin journée');
-    }
-    
-    if (hasPartenaireId && hasPartenaireNom) {
-      validationErrors.push('Choisissez soit un partenaire enregistré, soit un nom libre (pas les deux)');
-    }
-    
-    if (!typeOperation) validationErrors.push('typeOperation requis');
-    if (!montant) validationErrors.push('montant requis');
-    
-    if (validationErrors.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Données manquantes: ' + validationErrors.join(', ')
-      });
-    }
-
-    const montantFloat = parseFloat(montant);
-    
-    if (isNaN(montantFloat) || montantFloat <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Le montant doit être un nombre positif'
-      });
-    }
-
-    const validOperations = ['depot', 'retrait'];
-
-    if (!validOperations.includes(typeOperation)) {
-      return res.status(400).json({
-        success: false,
-        message: 'typeOperation doit être "depot" ou "retrait"'
-      });
-    }
-
-    if (!isPartnerTransaction) {
-      if (!typeCompte) {
-        return res.status(400).json({
-          success: false,
-          message: 'Type de compte requis pour transactions début/fin journée'
-        });
+      const validationErrors = [];
+      
+      if (!superviseurId) validationErrors.push('superviseurId requis');
+      
+      const hasPartenaireId = !!partenaireId;
+      const hasPartenaireNom = !!partenaireNom;
+      const isPartnerTransaction = hasPartenaireId || hasPartenaireNom;
+      
+      if (!isPartnerTransaction && !typeCompte) {
+        validationErrors.push('typeCompte requis pour transactions début/fin journée');
       }
       
-      const validAccountTypes = ['LIQUIDE', 'ORANGE_MONEY', 'WAVE', 'UV_MASTER'];
+      if (hasPartenaireId && hasPartenaireNom) {
+        validationErrors.push('Choisissez soit un partenaire enregistré, soit un nom libre (pas les deux)');
+      }
       
-      if (!validAccountTypes.includes(typeCompte.toUpperCase())) {
+      if (!typeOperation) validationErrors.push('typeOperation requis');
+      if (!montant) validationErrors.push('montant requis');
+      
+      if (validationErrors.length > 0) {
         return res.status(400).json({
           success: false,
-          message: 'Type de compte invalide'
+          message: 'Données manquantes: ' + validationErrors.join(', ')
         });
       }
-    }
 
-    console.log('✅ [CONTROLLER] Validation passée, appel service...');
+      const montantFloat = parseFloat(montant);
+      
+      if (isNaN(montantFloat) || montantFloat <= 0) {
+        return res.status(400).json({ success: false, message: 'Le montant doit être un nombre positif' });
+      }
 
-    const result = await TransactionService.createAdminTransaction(adminId, {
-      superviseurId,
-      typeCompte: isPartnerTransaction ? null : typeCompte.toUpperCase(),
-      typeOperation,
-      montant: montantFloat,
-      partenaireId: partenaireId || null,
-      partenaireNom: partenaireNom || null
-    });
+      if (!['depot', 'retrait'].includes(typeOperation)) {
+        return res.status(400).json({ success: false, message: 'typeOperation doit être "depot" ou "retrait"' });
+      }
 
-    const operationLabel = typeOperation === 'depot' ? 'Dépôt' : 'Retrait';
-    const transactionTypeLabel = isPartnerTransaction 
-      ? `${operationLabel} partenaire` 
-      : `${operationLabel} journée`;
-
-    res.status(201).json({
-      success: true,
-      message: `${transactionTypeLabel} créé avec succès`,
-      data: {
-        ...result,
-        summary: {
-          type: isPartnerTransaction ? 'PARTENAIRE' : 'JOURNEE',
-          operation: typeOperation,
-          superviseur: result.transaction.superviseurNom,
-          partenaire: result.transaction.partnerName,
-          montant: result.transaction.montant,
-          typeCompte: isPartnerTransaction ? null : typeCompte.toUpperCase(),
-          soldeApres: result.soldeActuel || null,
-          isRegisteredPartner: result.transaction.isRegisteredPartner || false
+      if (!isPartnerTransaction) {
+        if (!typeCompte) {
+          return res.status(400).json({
+            success: false,
+            message: 'Type de compte requis pour transactions début/fin journée'
+          });
+        }
+        
+        const validAccountTypes = ['LIQUIDE', 'ORANGE_MONEY', 'WAVE', 'UV_MASTER', 'FREE_MONEY', 'WESTERN_UNION', 'RIA', 'MONEYGRAM', 'AUTRES'];
+        
+        if (!validAccountTypes.includes(typeCompte.toUpperCase())) {
+          return res.status(400).json({ success: false, message: 'Type de compte invalide' });
         }
       }
-    });
 
-  } catch (error) {
-    console.error('❌ [CONTROLLER] Erreur createAdminTransaction:', error);
-    
-    const errorMappings = {
-      'Superviseur non trouvé': { status: 404, message: 'Superviseur non trouvé ou inactif' },
-      'Partenaire non trouvé': { status: 404, message: 'Partenaire enregistré non trouvé ou inactif' },
-      'Solde insuffisant': { status: 400, message: error.message },
-      'Nom du partenaire invalide': { status: 400, message: error.message }
-    };
+      console.log('✅ [CONTROLLER] Validation passée, appel service...');
 
-    for (const [errorKey, errorResponse] of Object.entries(errorMappings)) {
-      if (error.message.includes(errorKey)) {
-        return res.status(errorResponse.status).json({
-          success: false,
-          message: errorResponse.message
-        });
+      const result = await TransactionService.createAdminTransaction(adminId, {
+        superviseurId,
+        typeCompte: isPartnerTransaction ? null : typeCompte.toUpperCase(),
+        typeOperation,
+        montant: montantFloat,
+        partenaireId: partenaireId || null,
+        partenaireNom: partenaireNom || null,
+        telephoneLibre: telephoneLibre || null   // ← NOUVEAU
+      });
+
+      const operationLabel = typeOperation === 'depot' ? 'Dépôt' : 'Retrait';
+      const transactionTypeLabel = isPartnerTransaction 
+        ? `${operationLabel} partenaire` 
+        : `${operationLabel} journée`;
+
+      res.status(201).json({
+        success: true,
+        message: `${transactionTypeLabel} créé avec succès`,
+        data: {
+          ...result,
+          summary: {
+            type: isPartnerTransaction ? 'PARTENAIRE' : 'JOURNEE',
+            operation: typeOperation,
+            superviseur: result.transaction.superviseurNom,
+            partenaire: result.transaction.partnerName,
+            montant: result.transaction.montant,
+            typeCompte: isPartnerTransaction ? null : typeCompte.toUpperCase(),
+            soldeApres: result.soldeActuel || null,
+            isRegisteredPartner: result.transaction.isRegisteredPartner || false
+          }
+        }
+      });
+
+    } catch (error) {
+      console.error('❌ [CONTROLLER] Erreur createAdminTransaction:', error);
+      
+      const errorMappings = {
+        'Superviseur non trouvé': { status: 404, message: 'Superviseur non trouvé ou inactif' },
+        'Partenaire non trouvé': { status: 404, message: 'Partenaire enregistré non trouvé ou inactif' },
+        'Solde insuffisant': { status: 400, message: error.message },
+        'Nom du partenaire invalide': { status: 400, message: error.message }
+      };
+
+      for (const [errorKey, errorResponse] of Object.entries(errorMappings)) {
+        if (error.message.includes(errorKey)) {
+          return res.status(errorResponse.status).json({ success: false, message: errorResponse.message });
+        }
       }
-    }
 
-    res.status(500).json({
-      success: false,
-      message: error.message || 'Erreur lors de la création de la transaction admin'
-    });
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Erreur lors de la création de la transaction admin'
+      });
+    }
   }
-}
+
   // ✏️ MISE À JOUR TRANSACTION - ULTRA OPTIMISÉE
   async updateTransaction(req, res) {
     console.log('🔄 [OPTIMIZED] updateTransaction démarré:', {
@@ -437,32 +409,22 @@ async createAdminTransaction(req, res) {
       const updateData = req.body;
       const userId = req.user.id;
 
-      // ✅ VALIDATIONS PRÉCOCES GROUPÉES
       const validationErrors = [];
-      
       if (!transactionId) validationErrors.push('ID de transaction requis');
       if (!updateData || Object.keys(updateData).length === 0) validationErrors.push('Données de mise à jour requises');
       
       if (validationErrors.length > 0) {
-        return res.status(400).json({
-          success: false,
-          message: validationErrors.join(', ')
-        });
+        return res.status(400).json({ success: false, message: validationErrors.join(', ') });
       }
 
-      // ✅ CONVERSION SÉCURISÉE DU MONTANT SI PRÉSENT
       if (updateData.montant) {
         const montantFloat = parseFloat(updateData.montant);
         if (isNaN(montantFloat) || montantFloat <= 0) {
-          return res.status(400).json({
-            success: false,
-            message: 'Montant invalide'
-          });
+          return res.status(400).json({ success: false, message: 'Montant invalide' });
         }
         updateData.montant = montantFloat;
       }
 
-      // ✅ APPEL SERVICE OPTIMISÉ
       const result = await TransactionService.updateTransaction(transactionId, updateData, userId);
 
       console.log('✅ [OPTIMIZED] Transaction mise à jour avec succès');
@@ -478,7 +440,6 @@ async createAdminTransaction(req, res) {
         timestamp: new Date().toISOString()
       });
 
-      // ✅ GESTION D'ERREURS OPTIMISÉE AVEC MAP
       const errorStatusMap = new Map([
         [['non trouvée', 'not found'], 404],
         [['Permissions insuffisantes', 'permissions'], 403],
@@ -487,10 +448,7 @@ async createAdminTransaction(req, res) {
 
       for (const [keywords, status] of errorStatusMap) {
         if (keywords.some(keyword => error.message.includes(keyword))) {
-          return res.status(status).json({
-            success: false,
-            message: error.message
-          });
+          return res.status(status).json({ success: false, message: error.message });
         }
       }
 
@@ -508,64 +466,31 @@ async createAdminTransaction(req, res) {
       const { transactionId } = req.params;
 
       if (!transactionId) {
-        return res.status(400).json({
-          success: false,
-          message: 'ID de transaction requis'
-        });
+        return res.status(400).json({ success: false, message: 'ID de transaction requis' });
       }
 
       console.log('🔍 [OPTIMIZED] getTransactionDetails:', {
-        transactionId,
-        userId: req.user.id,
-        userRole: req.user.role,
+        transactionId, userId: req.user.id, userRole: req.user.role,
         timestamp: new Date().toISOString()
       });
 
-      // ✅ REQUÊTE UNIQUE OPTIMISÉE avec tous les JOINs
       const transaction = await prisma.transaction.findUnique({
         where: { id: transactionId },
         select: {
-          id: true,
-          type: true,
-          montant: true,
-          description: true,
-          createdAt: true,
-          envoyeurId: true,
-          destinataireId: true,
-          partenaireId: true,
-          metadata: true,
-          envoyeur: {
-            select: { id: true, nomComplet: true, role: true }
-          },
-          destinataire: {
-            select: { id: true, nomComplet: true, role: true }
-          },
-          partenaire: {
-            select: { id: true, nomComplet: true }
-          },
-          compteDestination: {
-            select: { id: true, type: true, balance: true, initialBalance: true }
-          }
+          id: true, type: true, montant: true, description: true,
+          createdAt: true, envoyeurId: true, destinataireId: true, partenaireId: true, metadata: true,
+          envoyeur:         { select: { id: true, nomComplet: true, role: true } },
+          destinataire:     { select: { id: true, nomComplet: true, role: true } },
+          partenaire:       { select: { id: true, nomComplet: true } },
+          compteDestination:{ select: { id: true, type: true, balance: true, initialBalance: true } }
         }
       });
 
       if (!transaction) {
         console.log('❌ [OPTIMIZED] Transaction non trouvée:', transactionId);
-        return res.status(404).json({
-          success: false,
-          message: 'Transaction non trouvée'
-        });
+        return res.status(404).json({ success: false, message: 'Transaction non trouvée' });
       }
 
-      console.log('📊 [OPTIMIZED] Transaction trouvée:', {
-        id: transaction.id,
-        type: transaction.type,
-        envoyeurId: transaction.envoyeurId,
-        destinataireId: transaction.destinataireId,
-        partenaireId: transaction.partenaireId
-      });
-
-      // ✅ PERMISSIONS OPTIMISÉES - Logique simplifiée
       const userRole = req.user.role;
       const userId = req.user.id;
       
@@ -576,7 +501,6 @@ async createAdminTransaction(req, res) {
         canView = true;
         viewReason = 'Admin - accès total';
       } else if (userRole === 'SUPERVISEUR') {
-        // Superviseur peut voir ses transactions ET celles de ses partenaires
         canView = userId === transaction.destinataireId || 
                   userId === transaction.envoyeurId || 
                   !!transaction.partenaireId;
@@ -587,19 +511,12 @@ async createAdminTransaction(req, res) {
       }
 
       if (!canView) {
-        console.log('❌ [OPTIMIZED] Accès refusé - permissions insuffisantes');
-        return res.status(403).json({
-          success: false,
-          message: 'Vous n\'avez pas accès à cette transaction'
-        });
+        return res.status(403).json({ success: false, message: 'Vous n\'avez pas accès à cette transaction' });
       }
 
-      // ✅ CALCULS OPTIMISÉS - Moins de logique conditionnelle
       const ageInDays = Math.floor((Date.now() - new Date(transaction.createdAt)) / (1000 * 60 * 60 * 24));
-      
       const modifiableTypes = new Set(['DEPOT', 'RETRAIT', 'DEBUT_JOURNEE', 'FIN_JOURNEE']);
       
-      // ✅ PERMISSIONS SELON LE RÔLE - TABLE DE VÉRITÉ SIMPLIFIÉE
       const permissionRules = {
         ADMIN: {
           canModify: modifiableTypes.has(transaction.type) && ageInDays <= 7,
@@ -614,25 +531,12 @@ async createAdminTransaction(req, res) {
           restrictions: ['Superviseur peut modifier ses propres transactions seulement', 'Limite de 1 jour après création']
         },
         PARTENAIRE: {
-          canModify: false,
-          canDelete: false,
-          timeLimit: 0,
+          canModify: false, canDelete: false, timeLimit: 0,
           restrictions: ['Les partenaires ne peuvent pas modifier les transactions']
         }
       };
 
       const permissions = permissionRules[userRole] || permissionRules.PARTENAIRE;
-
-      console.log('✅ [OPTIMIZED] Permissions calculées:', {
-        canView,
-        canModify: permissions.canModify,
-        canDelete: permissions.canDelete,
-        timeLimit: permissions.timeLimit,
-        ageInDays,
-        viewReason
-      });
-
-      // ✅ CONVERSION OPTIMISÉE DES MONTANTS
       const convertFromInt = (value) => Number(value) / 100;
 
       res.json({
@@ -640,13 +544,10 @@ async createAdminTransaction(req, res) {
         message: 'Détails de la transaction récupérés',
         data: {
           transaction: {
-            id: transaction.id,
-            type: transaction.type,
+            id: transaction.id, type: transaction.type,
             montant: convertFromInt(transaction.montant),
-            description: transaction.description,
-            createdAt: transaction.createdAt,
-            envoyeur: transaction.envoyeur,
-            destinataire: transaction.destinataire,
+            description: transaction.description, createdAt: transaction.createdAt,
+            envoyeur: transaction.envoyeur, destinataire: transaction.destinataire,
             partenaire: transaction.partenaire,
             compte: transaction.compteDestination ? {
               ...transaction.compteDestination,
@@ -656,47 +557,27 @@ async createAdminTransaction(req, res) {
             metadata: transaction.metadata ? JSON.parse(transaction.metadata) : null
           },
           permissions: {
-            canView: canView,
-            canModify: permissions.canModify,
-            canDelete: permissions.canDelete,
-            userRole: req.user.role,
-            timeLimit: `${permissions.timeLimit} jour(s)`,
-            restrictions: permissions.restrictions,
-            viewReason: viewReason
+            canView, canModify: permissions.canModify, canDelete: permissions.canDelete,
+            userRole: req.user.role, timeLimit: `${permissions.timeLimit} jour(s)`,
+            restrictions: permissions.restrictions, viewReason
           },
           ageInDays,
           rules: {
-            admin: {
-              timeLimit: 7,
-              canModifyAll: true,
-              canDeleteAll: true
-            },
+            admin: { timeLimit: 7, canModifyAll: true, canDeleteAll: true },
             superviseur: {
-              timeLimit: 1,
-              canModifyOwn: true,
-              canDeleteOwn: 'DEPOT/RETRAIT seulement',
-              restrictions: [
-                'Seulement ses propres transactions',
-                'Maximum 24h après création'
-              ]
+              timeLimit: 1, canModifyOwn: true, canDeleteOwn: 'DEPOT/RETRAIT seulement',
+              restrictions: ['Seulement ses propres transactions', 'Maximum 24h après création']
             },
-            partenaire: {
-              canView: 'Ses propres transactions seulement',
-              canModify: false,
-              canDelete: false
-            }
+            partenaire: { canView: 'Ses propres transactions seulement', canModify: false, canDelete: false }
           }
         }
       });
 
     } catch (error) {
       console.error('❌ [OPTIMIZED] Erreur getTransactionDetails:', {
-        error: error.message,
-        transactionId: req.params.transactionId,
-        userId: req.user?.id,
-        userRole: req.user?.role
+        error: error.message, transactionId: req.params.transactionId,
+        userId: req.user?.id, userRole: req.user?.role
       });
-      
       res.status(500).json({
         success: false,
         message: 'Erreur lors de la récupération des détails de la transaction',
@@ -709,42 +590,23 @@ async createAdminTransaction(req, res) {
   async getTransactionAuditHistory(req, res) {
     try {
       if (req.user.role !== 'ADMIN') {
-        return res.status(403).json({
-          success: false,
-          message: 'Accès réservé aux administrateurs'
-        });
+        return res.status(403).json({ success: false, message: 'Accès réservé aux administrateurs' });
       }
 
       const { page = 1, limit = 20, type = 'all' } = req.query;
 
-      // ✅ CONSTRUCTION DYNAMIQUE DU FILTRE
-      const whereClause = {
-        type: { in: ['AUDIT_MODIFICATION', 'AUDIT_SUPPRESSION'] }
-      };
+      const whereClause = { type: { in: ['AUDIT_MODIFICATION', 'AUDIT_SUPPRESSION'] } };
 
-      if (type === 'modifications') {
-        whereClause.type = 'AUDIT_MODIFICATION';
-      } else if (type === 'suppressions') {
-        whereClause.type = 'AUDIT_SUPPRESSION';
-      }
+      if (type === 'modifications') whereClause.type = 'AUDIT_MODIFICATION';
+      else if (type === 'suppressions') whereClause.type = 'AUDIT_SUPPRESSION';
 
-      // ✅ REQUÊTE PARALLÈLE
       const [auditTransactions, totalCount] = await Promise.all([
         prisma.transaction.findMany({
           where: whereClause,
           select: {
-            id: true,
-            type: true,
-            montant: true,
-            description: true,
-            createdAt: true,
-            metadata: true,
-            envoyeur: {
-              select: { nomComplet: true }
-            },
-            destinataire: {
-              select: { nomComplet: true }
-            }
+            id: true, type: true, montant: true, description: true, createdAt: true, metadata: true,
+            envoyeur:    { select: { nomComplet: true } },
+            destinataire:{ select: { nomComplet: true } }
           },
           orderBy: { createdAt: 'desc' },
           skip: (parseInt(page) - 1) * parseInt(limit),
@@ -753,14 +615,10 @@ async createAdminTransaction(req, res) {
         prisma.transaction.count({ where: whereClause })
       ]);
 
-      // ✅ FORMATAGE OPTIMISÉ
       const convertFromInt = (value) => Number(value) / 100;
       
       const formattedAudit = auditTransactions.map(audit => ({
-        id: audit.id,
-        type: audit.type,
-        description: audit.description,
-        createdAt: audit.createdAt,
+        id: audit.id, type: audit.type, description: audit.description, createdAt: audit.createdAt,
         adminResponsable: audit.envoyeur.nomComplet,
         superviseurConcerne: audit.destinataire.nomComplet,
         montant: convertFromInt(audit.montant),
@@ -775,18 +633,14 @@ async createAdminTransaction(req, res) {
           pagination: {
             currentPage: parseInt(page),
             totalPages: Math.ceil(totalCount / parseInt(limit)),
-            totalCount,
-            limit: parseInt(limit)
+            totalCount, limit: parseInt(limit)
           }
         }
       });
 
     } catch (error) {
       console.error('❌ [OPTIMIZED] Erreur getTransactionAuditHistory:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Erreur lors de la récupération de l\'historique d\'audit'
-      });
+      res.status(500).json({ success: false, message: 'Erreur lors de la récupération de l\'historique d\'audit' });
     }
   }
 
@@ -794,16 +648,12 @@ async createAdminTransaction(req, res) {
   async updateSupervisorAccount(req, res) {
     try {
       if (req.user.role !== 'ADMIN') {
-        return res.status(403).json({
-          success: false,
-          message: 'Accès réservé aux administrateurs'
-        });
+        return res.status(403).json({ success: false, message: 'Accès réservé aux administrateurs' });
       }
 
       const { supervisorId } = req.params;
       const { accountType, accountKey, newValue } = req.body;
 
-      // ✅ VALIDATION GROUPÉE
       const requiredFields = { accountType, accountKey, newValue };
       const missingFields = Object.entries(requiredFields)
         .filter(([key, value]) => value === undefined || value === null || value === '')
@@ -816,58 +666,38 @@ async createAdminTransaction(req, res) {
         });
       }
 
-      // ✅ VALIDATION DU MONTANT OPTIMISÉE
       const newValueFloat = parseFloat(newValue);
       
       if (isNaN(newValueFloat) || newValueFloat < 0) {
-        return res.status(400).json({
-          success: false,
-          message: 'La valeur doit être un nombre positif'
-        });
+        return res.status(400).json({ success: false, message: 'La valeur doit être un nombre positif' });
       }
 
-      // ✅ VÉRIFICATION SUPERVISEUR OPTIMISÉE
       const supervisor = await prisma.user.findUnique({
         where: { id: supervisorId, role: 'SUPERVISEUR' },
         select: { id: true, nomComplet: true }
       });
 
       if (!supervisor) {
-        return res.status(404).json({
-          success: false,
-          message: 'Superviseur non trouvé'
-        });
+        return res.status(404).json({ success: false, message: 'Superviseur non trouvé' });
       }
 
-      // ✅ APPEL SERVICE OPTIMISÉ
       const result = await TransactionService.updateSupervisorAccount(
-        supervisorId,
-        accountType,
-        accountKey,
-        newValueFloat,
-        req.user.id
+        supervisorId, accountType, accountKey, newValueFloat, req.user.id
       );
 
       res.json({
         success: true,
         message: `Compte ${accountKey} mis à jour avec succès`,
         data: {
-          supervisorId,
-          accountType,
-          accountKey,
-          oldValue: result.oldValue,
-          newValue: result.newValue,
-          updatedAt: new Date(),
-          updatedBy: req.user.nomComplet
+          supervisorId, accountType, accountKey,
+          oldValue: result.oldValue, newValue: result.newValue,
+          updatedAt: new Date(), updatedBy: req.user.nomComplet
         }
       });
 
     } catch (error) {
       console.error('❌ [OPTIMIZED] Erreur updateSupervisorAccount:', error);
-      res.status(500).json({
-        success: false,
-        message: error.message || 'Erreur lors de la mise à jour du compte'
-      });
+      res.status(500).json({ success: false, message: error.message || 'Erreur lors de la mise à jour du compte' });
     }
   }
 
@@ -875,38 +705,23 @@ async createAdminTransaction(req, res) {
   async getAvailableSupervisors(req, res) {
     try {
       if (req.user.role !== 'PARTENAIRE') {
-        return res.status(403).json({
-          success: false,
-          message: 'Accès réservé aux partenaires'
-        });
+        return res.status(403).json({ success: false, message: 'Accès réservé aux partenaires' });
       }
 
-      // ✅ CACHE SIMPLE POUR LES SUPERVISEURS (optionnel)
-      // On peut ajouter une mise en cache Redis ici si nécessaire
       const supervisors = await TransactionService.getActiveSupervisors();
 
-      res.json({
-        success: true,
-        message: 'Liste des superviseurs disponibles',
-        data: { supervisors }
-      });
+      res.json({ success: true, message: 'Liste des superviseurs disponibles', data: { supervisors } });
 
     } catch (error) {
       console.error('❌ [OPTIMIZED] Erreur getAvailableSupervisors:', error);
-      res.status(500).json({
-        success: false,
-        message: error.message || 'Erreur lors de la récupération des superviseurs'
-      });
+      res.status(500).json({ success: false, message: error.message || 'Erreur lors de la récupération des superviseurs' });
     }
   }
 
   async getDailyTransferStatus(req, res) {
     try {
       if (req.user.role !== 'ADMIN') {
-        return res.status(403).json({
-          success: false,
-          message: 'Accès réservé aux administrateurs'
-        });
+        return res.status(403).json({ success: false, message: 'Accès réservé aux administrateurs' });
       }
 
       const lastTransferDate = await TransactionService.getLastTransferDate();
@@ -917,43 +732,29 @@ async createAdminTransaction(req, res) {
         success: true,
         message: 'Statut du transfert quotidien',
         data: {
-          lastTransferDate,
-          today,
-          transferDoneToday,
-          nextTransferAt: transferDoneToday 
-            ? 'Demain à 00h00' 
-            : 'En attente du prochain cycle',
+          lastTransferDate, today, transferDoneToday,
+          nextTransferAt: transferDoneToday ? 'Demain à 00h00' : 'En attente du prochain cycle',
           status: transferDoneToday ? 'COMPLETED' : 'PENDING'
         }
       });
 
     } catch (error) {
       console.error('❌ Erreur getDailyTransferStatus:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Erreur lors de la vérification du statut'
-      });
+      res.status(500).json({ success: false, message: 'Erreur lors de la vérification du statut' });
     }
   }
 
-  // NOUVELLE MÉTHODE: Voir les transactions archivées (ADMIN seulement)
+  // Voir les transactions archivées (ADMIN seulement)
   async getArchivedTransactions(req, res) {
     try {
       if (req.user.role !== 'ADMIN') {
-        return res.status(403).json({
-          success: false,
-          message: 'Accès réservé aux administrateurs'
-        });
+        return res.status(403).json({ success: false, message: 'Accès réservé aux administrateurs' });
       }
 
       const { page = 1, limit = 20, dateFrom, dateTo } = req.query;
 
-      const whereClause = {
-        partenaireId: { not: null },
-        archived: true
-      };
+      const whereClause = { partenaireId: { not: null }, archived: true };
 
-      // Filtrage par date si spécifié
       if (dateFrom || dateTo) {
         whereClause.createdAt = {};
         if (dateFrom) whereClause.createdAt.gte = new Date(dateFrom);
@@ -964,14 +765,10 @@ async createAdminTransaction(req, res) {
         prisma.transaction.findMany({
           where: whereClause,
           select: {
-            id: true,
-            type: true,
-            montant: true,
-            description: true,
-            createdAt: true,
-            archivedAt: true,
-            partenaire: { select: { nomComplet: true } },
-            destinataire: { select: { nomComplet: true } },
+            id: true, type: true, montant: true, description: true,
+            createdAt: true, archivedAt: true,
+            partenaire:        { select: { nomComplet: true } },
+            destinataire:      { select: { nomComplet: true } },
             compteDestination: { select: { type: true } }
           },
           orderBy: { archivedAt: 'desc' },
@@ -984,12 +781,8 @@ async createAdminTransaction(req, res) {
       const convertFromInt = (value) => Number(value) / 100;
 
       const formattedTransactions = archivedTransactions.map(tx => ({
-        id: tx.id,
-        type: tx.type,
-        montant: convertFromInt(tx.montant),
-        description: tx.description,
-        createdAt: tx.createdAt,
-        archivedAt: tx.archivedAt,
+        id: tx.id, type: tx.type, montant: convertFromInt(tx.montant),
+        description: tx.description, createdAt: tx.createdAt, archivedAt: tx.archivedAt,
         partenaire: tx.partenaire?.nomComplet,
         superviseur: tx.destinataire?.nomComplet,
         typeCompte: tx.compteDestination?.type
@@ -1003,37 +796,29 @@ async createAdminTransaction(req, res) {
           pagination: {
             currentPage: parseInt(page),
             totalPages: Math.ceil(totalCount / parseInt(limit)),
-            totalCount,
-            limit: parseInt(limit)
+            totalCount, limit: parseInt(limit)
           }
         }
       });
 
     } catch (error) {
       console.error('❌ Erreur getArchivedTransactions:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Erreur lors de la récupération des transactions archivées'
-      });
+      res.status(500).json({ success: false, message: 'Erreur lors de la récupération des transactions archivées' });
     }
   }
 
-  // MODIFICATION de getDashboard pour s'assurer que le transfert quotidien est vérifié
+  // Vérification du transfert quotidien
   async getDashboard(req, res) {
     try {
       const user = req.user;
       const { period = 'today' } = req.query;
 
-      // ✅ VÉRIFICATION AUTOMATIQUE DU TRANSFERT QUOTIDIEN (non-bloquante)
       setImmediate(() => {
         TransactionService.checkAndTransferDaily().catch(error => {
           console.error('Erreur transfert quotidien automatique:', error);
         });
       });
 
-      let dashboardData;
-
-      // Switch optimisé selon le rôle
       const dashboardPromise = (() => {
         switch (user.role) {
           case 'ADMIN':
@@ -1050,87 +835,137 @@ async createAdminTransaction(req, res) {
         }
       })();
 
-      dashboardData = await dashboardPromise;
+      const dashboardData = await dashboardPromise;
 
       res.json({
         success: true,
         message: `Dashboard ${user.role.toLowerCase()} récupéré avec succès`,
-        data: {
-          userRole: user.role,
-          period,
-          dashboard: dashboardData
-        }
+        data: { userRole: user.role, period, dashboard: dashboardData }
       });
 
     } catch (error) {
       console.error('❌ Erreur getDashboard:', error);
-      res.status(500).json({
-        success: false,
-        message: error.message || 'Erreur lors de la récupération du dashboard'
-      });
+      res.status(500).json({ success: false, message: error.message || 'Erreur lors de la récupération du dashboard' });
     }
   }
 
+  // Dates disponibles
+  async getAvailableDates(req, res) {
+    try {
+      const userId = req.user.role === 'SUPERVISEUR' ? req.user.id : null;
+      const role = req.user.role;
+      
+      const dates = await TransactionService.getAvailableDates(userId, role);
 
-  // Nouvelle méthode - Dates disponibles
-async getAvailableDates(req, res) {
-  try {
-    const userId = req.user.role === 'SUPERVISEUR' ? req.user.id : null;
-    const role = req.user.role;
-    
-    const dates = await TransactionService.getAvailableDates(userId, role);
+      res.json({ success: true, data: { availableDates: dates, totalDates: dates.length } });
 
-    res.json({
-      success: true,
-      data: {
-        availableDates: dates,
-        totalDates: dates.length
+    } catch (error) {
+      console.error('Erreur getAvailableDates:', error);
+      res.status(500).json({ success: false, message: 'Erreur lors de la récupération des dates disponibles' });
+    }
+  }
+
+  // Test filtrage date (ADMIN seulement)
+  async testDateFilter(req, res) {
+    try {
+      if (req.user.role !== 'ADMIN') {
+        return res.status(403).json({ success: false, message: 'Accès réservé aux administrateurs' });
       }
-    });
 
-  } catch (error) {
-    console.error('Erreur getAvailableDates:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Erreur lors de la récupération des dates disponibles'
-    });
-  }
-}
+      const { date } = req.body;
 
-// Nouvelle méthode - Test filtrage date (ADMIN seulement)
-async testDateFilter(req, res) {
-  try {
-    if (req.user.role !== 'ADMIN') {
-      return res.status(403).json({
-        success: false,
-        message: 'Accès réservé aux administrateurs'
-      });
+      if (!date) {
+        return res.status(400).json({ success: false, message: 'Date requise pour le test' });
+      }
+
+      const testResult = await TransactionService.testDateFiltering(date);
+
+      res.json({ success: !testResult.error, data: testResult });
+
+    } catch (error) {
+      console.error('Erreur testDateFilter:', error);
+      res.status(500).json({ success: false, message: 'Erreur lors du test de filtrage' });
     }
-
-    const { date } = req.body;
-
-    if (!date) {
-      return res.status(400).json({
-        success: false,
-        message: 'Date requise pour le test'
-      });
-    }
-
-    const testResult = await TransactionService.testDateFiltering(date);
-
-    res.json({
-      success: !testResult.error,
-      data: testResult
-    });
-
-  } catch (error) {
-    console.error('Erreur testDateFilter:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Erreur lors du test de filtrage'
-    });
   }
-}
+
+  // =====================================
+  // PARTENAIRES LIBRES FRÉQUENTS — NOUVEAU
+  // =====================================
+
+  // 🔍 LISTE DES PARTENAIRES LIBRES FRÉQUENTS
+  async getFrequentFreePartners(req, res) {
+    try {
+      if (req.user.role !== 'ADMIN') {
+        return res.status(403).json({ success: false, message: 'Accès réservé aux administrateurs' });
+      }
+
+      const { superviseurId, daysBack = 3, minTransactions = 3 } = req.query;
+
+      const partners = await TransactionService.getFrequentFreePartners(
+        superviseurId || null,
+        parseInt(daysBack),
+        parseInt(minTransactions)
+      );
+
+      res.json({
+        success: true,
+        message: `${partners.length} partenaire(s) fréquent(s) détecté(s)`,
+        data: {
+          partners,
+          config: { daysBack: parseInt(daysBack), minTransactions: parseInt(minTransactions) }
+        }
+      });
+
+    } catch (error) {
+      console.error('❌ getFrequentFreePartners:', error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  }
+
+  // 🔄 CONVERTIR PARTENAIRE LIBRE EN VRAI COMPTE
+  async convertFreePartner(req, res) {
+    try {
+      if (req.user.role !== 'ADMIN') {
+        return res.status(403).json({ success: false, message: 'Accès réservé aux administrateurs' });
+      }
+
+      const { partenaireNom, telephoneLibre } = req.body;
+
+      if (!partenaireNom || !telephoneLibre) {
+        return res.status(400).json({
+          success: false,
+          message: 'partenaireNom et telephoneLibre sont requis'
+        });
+      }
+
+      const result = await TransactionService.convertFreePartnerToAccount(
+        partenaireNom,
+        telephoneLibre,
+        req.user.id
+      );
+
+      res.status(201).json({
+        success: true,
+        message: `${result.user.nomComplet} est maintenant un partenaire enregistré`,
+        data: {
+          user:      result.user,
+          codeAcces: result.codeAcces  // ⚠️ affiché UNE seule fois — l'admin doit le noter
+        }
+      });
+
+    } catch (error) {
+      console.error('❌ convertFreePartner:', error);
+
+      if (error.message.includes('déjà utilisé')) {
+        return res.status(409).json({ success: false, message: error.message });
+      }
+      if (error.message.includes('requis') || error.message.includes('invalide')) {
+        return res.status(400).json({ success: false, message: error.message });
+      }
+
+      res.status(500).json({ success: false, message: error.message });
+    }
+  }
 }
 
 export default new TransactionController();
