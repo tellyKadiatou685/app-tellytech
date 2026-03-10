@@ -32,9 +32,9 @@ const corsOptions = {
     ];
     
     const prodOrigins = [
-      
       'https://koula.telly-tech.com',
-      'https://fancy-voice-ad1a.kadiatoutelly685.workers.dev'
+      'https://fancy-voice-ad1a.kadiatoutelly685.workers.dev',
+      'https://app-tellytech.vercel.app' // ← ajoute aussi ça
     ];
     
     // Autoriser les requêtes sans origine (Postman, curl, etc.)
