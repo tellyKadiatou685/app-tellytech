@@ -32,11 +32,8 @@ const corsOptions = {
     ];
     
     const prodOrigins = [
-      'https://sbk-connect-hub-main-1ksco32j7.vercel.app',
-      'https://sbk-connect-hub-main-j7xp10ki9.vercel.app',
-      'https://sbk-connect-hub-main-j5854bh7.vercel.app',
-      'https://sbk-connect-hub-main-ji58s4bh7.vercel.app',
-      'https://sbk-frontend.pages.dev',
+      
+      'https://koula.telly-tech.com',
       'https://fancy-voice-ad1a.kadiatoutelly685.workers.dev'
     ];
     
