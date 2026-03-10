@@ -37,6 +37,7 @@ const corsOptions = {
       'https://sbk-connect-hub-main-j5854bh7.vercel.app',
       'https://sbk-connect-hub-main-ji58s4bh7.vercel.app',
       'https://sbk-frontend.pages.dev'
+      'https://proud-math-c168.kadiatoutelly685.workers.dev'
     ];
     
     // Autoriser les requêtes sans origine (Postman, curl, etc.)
