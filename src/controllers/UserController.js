@@ -48,7 +48,6 @@ class UserController {
     }
   }
 
-  // ✏️ MISE À JOUR PROFIL — nom, téléphone, adresse, photo (code exclu)
   async updateProfile(req, res) {
     try {
       const userId = req.user.id;
@@ -62,7 +61,6 @@ class UserController {
         });
       }
 
-      // Validation photo
       if (photo !== undefined && photo !== null && photo.trim().length > 0) {
         const isUrl    = photo.startsWith('http://') || photo.startsWith('https://');
         const isBase64 = photo.startsWith('data:image/');
@@ -74,18 +72,15 @@ class UserController {
         }
       }
 
-      // Validation nom
       if (nomComplet !== undefined && nomComplet.trim().length < 2) {
         return res.status(400).json({ success: false, message: 'Le nom doit contenir au moins 2 caractères' });
       }
 
-      // Validation téléphone
       if (telephone !== undefined && telephone.trim().length < 6) {
         return res.status(400).json({ success: false, message: 'Numéro de téléphone invalide' });
       }
 
       const result = await UserService.updateProfile(userId, { nomComplet, telephone, adresse, photo });
-
       res.json({ success: true, message: 'Profil mis à jour avec succès', data: { user: result.user } });
 
     } catch (error) {
@@ -179,6 +174,75 @@ class UserController {
     }
   }
 
+  // ✏️ MODIFICATION UTILISATEUR (Admin)
+  // PUT /api/users/:userId
+  // Body : nomComplet?, telephone?, adresse?, photo?, role?, status?, code?
+  async updateUser(req, res) {
+    try {
+      const { userId } = req.params;
+      const adminId    = req.user.id;
+
+      if (!userId) {
+        return res.status(400).json({ success: false, message: 'ID utilisateur requis' });
+      }
+
+      const { nomComplet, telephone, adresse, photo, role, status, code } = req.body;
+
+      const hasField = [nomComplet, telephone, adresse, photo, role, status, code]
+        .some(f => f !== undefined);
+      if (!hasField) {
+        return res.status(400).json({
+          success: false,
+          message: 'Fournissez au moins un champ à modifier : nomComplet, telephone, adresse, photo, role, status ou code'
+        });
+      }
+
+      // Validations basiques avant d'appeler le service
+      if (nomComplet !== undefined && nomComplet.trim().length < 2) {
+        return res.status(400).json({ success: false, message: 'Le nom doit contenir au moins 2 caractères' });
+      }
+
+      if (telephone !== undefined && telephone.trim().length < 6) {
+        return res.status(400).json({ success: false, message: 'Numéro de téléphone invalide' });
+      }
+
+      if (code !== undefined && code !== null && code.trim().length > 0 && code.trim().length < 4) {
+        return res.status(400).json({ success: false, message: 'Le code doit contenir au moins 4 caractères' });
+      }
+
+      if (photo !== undefined && photo !== null && photo.trim().length > 0) {
+        const isUrl    = photo.startsWith('http://') || photo.startsWith('https://');
+        const isBase64 = photo.startsWith('data:image/');
+        if (!isUrl && !isBase64) {
+          return res.status(400).json({
+            success: false,
+            message: 'Format photo invalide (URL https:// ou base64 data:image/...)'
+          });
+        }
+      }
+
+      const result = await UserService.updateUser(adminId, userId, {
+        nomComplet, telephone, adresse, photo, role, status, code
+      });
+
+      res.json({
+        success: true,
+        message: `Utilisateur ${result.user.nomComplet} mis à jour avec succès`,
+        data: result
+      });
+
+    } catch (error) {
+      console.error('❌ Erreur updateUser:', error.message);
+      const status = error.message.includes('introuvable')   ? 404
+                   : error.message.includes('Impossible')    ? 403
+                   : error.message.includes('déjà utilisé')  ? 409
+                   : error.message.includes('invalide')      ? 400
+                   : error.message.includes('Utilisez')      ? 400
+                   : 500;
+      res.status(status).json({ success: false, message: error.message });
+    }
+  }
+
   async getAllUsers(req, res) {
     try {
       const { role, status, search, page = 1, limit = 20, showCodes = false } = req.query;
@@ -234,9 +298,9 @@ class UserController {
 
     } catch (error) {
       console.error('❌ Erreur suppression:', error.message);
-      const status = error.message.includes('introuvable')    ? 404
-                   : error.message.includes('Impossible')     ? 403
-                   : error.message.includes('soldes non nuls')? 400
+      const status = error.message.includes('introuvable')     ? 404
+                   : error.message.includes('Impossible')      ? 403
+                   : error.message.includes('soldes non nuls') ? 400
                    : 500;
       res.status(status).json({ success: false, message: error.message });
     }
@@ -287,7 +351,10 @@ class UserController {
       res.json({
         success: true,
         message: `Nouveau code généré pour ${result.user.nomComplet}`,
-        data: { user: { id: result.user.id, nomComplet: result.user.nomComplet, telephone: result.user.telephone, role: result.user.role }, nouveauCode: result.newCode }
+        data: {
+          user: { id: result.user.id, nomComplet: result.user.nomComplet, telephone: result.user.telephone, role: result.user.role },
+          nouveauCode: result.newCode
+        }
       });
     } catch (error) {
       res.status(400).json({ success: false, message: error.message });

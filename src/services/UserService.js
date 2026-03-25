@@ -88,13 +88,11 @@ class UserService {
       const user = await prisma.user.findUnique({ where: { id: userId } });
       if (!user) throw new Error('Utilisateur introuvable');
 
-      // Si le téléphone change, vérifier qu'il n'est pas déjà pris
       if (telephone && telephone.trim() !== user.telephone) {
         const existing = await prisma.user.findUnique({ where: { telephone: telephone.trim() } });
         if (existing) throw new Error('Ce numéro de téléphone est déjà utilisé');
       }
 
-      // Valider la photo si fournie
       if (photo !== undefined && photo !== null && photo.trim().length > 0) {
         const isUrl    = photo.startsWith('http://') || photo.startsWith('https://');
         const isBase64 = photo.startsWith('data:image/');
@@ -103,7 +101,6 @@ class UserService {
         }
       }
 
-      // Construire uniquement les champs fournis
       const updateData = {};
       if (nomComplet !== undefined) updateData.nomComplet = nomComplet.trim();
       if (telephone  !== undefined) updateData.telephone  = telephone.trim();
@@ -269,7 +266,6 @@ class UserService {
 
   async createUser(userData) {
     try {
-      // Code : custom (≥ 4 chars) ou auto-généré
       const accessCode = (userData.code && userData.code.trim().length >= 4)
         ? userData.code.trim()
         : this.generateAccessCode();
@@ -314,6 +310,121 @@ class UserService {
     } catch (error) {
       if (error.code === 'P2002') throw new Error('Ce numéro de téléphone est déjà utilisé');
       throw new Error(`Erreur création utilisateur : ${error.message}`);
+    }
+  }
+
+  // =====================================
+  // MODIFICATION UTILISATEUR (Admin)
+  // Champs modifiables : nomComplet, telephone, adresse, photo, role, status
+  // Code : optionnel — si fourni (≥ 4 chars) il est rehasché
+  // =====================================
+
+  async updateUser(adminId, userId, payload) {
+    try {
+      const { nomComplet, telephone, adresse, photo, role, status, code } = payload;
+
+      const hasField = [nomComplet, telephone, adresse, photo, role, status, code]
+        .some(f => f !== undefined);
+      if (!hasField) throw new Error('Aucun champ à mettre à jour');
+
+      const user = await prisma.user.findUnique({ where: { id: userId } });
+      if (!user) throw new Error('Utilisateur introuvable');
+      if (user.role === 'ADMIN') throw new Error('Impossible de modifier un administrateur');
+      if (userId === adminId) throw new Error('Utilisez /profile pour modifier votre propre compte');
+
+      // Vérifier unicité du téléphone si changé
+      if (telephone && telephone.trim() !== user.telephone) {
+        const existing = await prisma.user.findUnique({ where: { telephone: telephone.trim() } });
+        if (existing) throw new Error('Ce numéro de téléphone est déjà utilisé');
+      }
+
+      // Valider le rôle si fourni
+      const rolesValides = ['SUPERVISEUR', 'PARTENAIRE'];
+      if (role !== undefined && !rolesValides.includes(role)) {
+        throw new Error(`Rôle invalide. Valeurs acceptées : ${rolesValides.join(', ')}`);
+      }
+
+      // Valider le statut si fourni
+      const statusValides = ['ACTIVE', 'SUSPENDED'];
+      if (status !== undefined && !statusValides.includes(status)) {
+        throw new Error(`Statut invalide. Valeurs acceptées : ${statusValides.join(', ')}`);
+      }
+
+      // Valider la photo si fournie
+      if (photo !== undefined && photo !== null && photo.trim().length > 0) {
+        const isUrl    = photo.startsWith('http://') || photo.startsWith('https://');
+        const isBase64 = photo.startsWith('data:image/');
+        if (!isUrl && !isBase64) {
+          throw new Error('Format photo invalide (URL https:// ou base64 data:image/...)');
+        }
+      }
+
+      // Construire les champs à mettre à jour
+      const updateData = {};
+      if (nomComplet !== undefined) updateData.nomComplet = nomComplet.trim();
+      if (telephone  !== undefined) updateData.telephone  = telephone.trim();
+      if (adresse    !== undefined) updateData.adresse    = adresse?.trim()  || null;
+      if (photo      !== undefined) updateData.photo      = photo?.trim()    || null;
+      if (role       !== undefined) updateData.role       = role;
+      if (status     !== undefined) updateData.status     = status;
+
+      // Code : rehacher si fourni et valide
+      let newCodeClair = null;
+      if (code !== undefined && code !== null && code.trim().length >= 4) {
+        const hashedCode       = await this.hashAccessCode(code.trim());
+        updateData.code        = hashedCode;
+        updateData.codeClair   = code.trim();
+        newCodeClair           = code.trim();
+      }
+
+      const updated = await prisma.user.update({
+        where: { id: userId },
+        data:  updateData,
+        select: {
+          id:         true,
+          telephone:  true,
+          nomComplet: true,
+          adresse:    true,
+          photo:      true,
+          role:       true,
+          status:     true,
+          updatedAt:  true
+        }
+      });
+
+      // Notifier l'utilisateur des changements importants
+      const changements = [];
+      if (nomComplet) changements.push('nom');
+      if (telephone)  changements.push('téléphone');
+      if (role)       changements.push('rôle');
+      if (status)     changements.push('statut');
+      if (newCodeClair) changements.push('code d\'accès');
+
+      if (changements.length > 0) {
+        const messageNotif = newCodeClair
+          ? `Votre compte a été mis à jour (${changements.join(', ')}). Nouveau code : ${newCodeClair}`
+          : `Votre compte a été mis à jour (${changements.join(', ')})`;
+
+        await NotificationService.createNotification({
+          userId: userId,
+          title:  'Compte mis à jour',
+          message: messageNotif,
+          type:   'CREATION_UTILISATEUR'
+        });
+      }
+
+      console.log(`✅ [UPDATE USER] Admin ${adminId} a modifié l'utilisateur ${userId} (${changements.join(', ')})`);
+
+      return {
+        user:        updated,
+        changements,
+        codeModifie: newCodeClair !== null,
+        ...(newCodeClair && { nouveauCode: newCodeClair })
+      };
+
+    } catch (error) {
+      console.error('❌ [UPDATE USER] Erreur:', error.message);
+      throw error;
     }
   }
 
@@ -534,7 +645,10 @@ class UserService {
         select: { id: true, nomComplet: true, telephone: true, codeClair: true, role: true, status: true }
       });
       if (!user) throw new Error('Utilisateur introuvable');
-      return { user: { id: user.id, nomComplet: user.nomComplet, telephone: user.telephone, role: user.role, status: user.status }, codeAcces: user.codeClair };
+      return {
+        user: { id: user.id, nomComplet: user.nomComplet, telephone: user.telephone, role: user.role, status: user.status },
+        codeAcces: user.codeClair
+      };
     } catch (error) {
       throw new Error(`Erreur récupération code : ${error.message}`);
     }
@@ -557,11 +671,19 @@ class UserService {
     try {
       const allUsers = await prisma.user.findMany({ select: { role: true, status: true, codeClair: true } });
       return {
-        totalUsers:          allUsers.length,
-        usersWithCodes:      allUsers.filter(u => u.codeClair).length,
-        usersWithoutCodes:   allUsers.filter(u => !u.codeClair).length,
-        byRole:   { ADMIN: allUsers.filter(u => u.role === 'ADMIN').length, SUPERVISEUR: allUsers.filter(u => u.role === 'SUPERVISEUR').length, PARTENAIRE: allUsers.filter(u => u.role === 'PARTENAIRE').length },
-        byStatus: { ACTIVE: allUsers.filter(u => u.status === 'ACTIVE').length, SUSPENDED: allUsers.filter(u => u.status === 'SUSPENDED').length, PENDING: allUsers.filter(u => u.status === 'PENDING').length }
+        totalUsers:        allUsers.length,
+        usersWithCodes:    allUsers.filter(u => u.codeClair).length,
+        usersWithoutCodes: allUsers.filter(u => !u.codeClair).length,
+        byRole: {
+          ADMIN:        allUsers.filter(u => u.role === 'ADMIN').length,
+          SUPERVISEUR:  allUsers.filter(u => u.role === 'SUPERVISEUR').length,
+          PARTENAIRE:   allUsers.filter(u => u.role === 'PARTENAIRE').length
+        },
+        byStatus: {
+          ACTIVE:    allUsers.filter(u => u.status === 'ACTIVE').length,
+          SUSPENDED: allUsers.filter(u => u.status === 'SUSPENDED').length,
+          PENDING:   allUsers.filter(u => u.status === 'PENDING').length
+        }
       };
     } catch (error) {
       throw new Error(`Erreur calcul statistiques : ${error.message}`);
@@ -605,11 +727,16 @@ class UserService {
   async broadcastNotification(adminId, notificationData) {
     try {
       const { title, message, type, targetRole } = notificationData;
-      const targetUsers = await prisma.user.findMany({ where: { role: targetRole, status: 'ACTIVE' }, select: { id: true, nomComplet: true } });
+      const targetUsers = await prisma.user.findMany({
+        where: { role: targetRole, status: 'ACTIVE' },
+        select: { id: true, nomComplet: true }
+      });
       if (targetUsers.length === 0) throw new Error(`Aucun utilisateur actif avec le rôle ${targetRole}`);
 
       const notifications = await Promise.all(
-        targetUsers.map(user => prisma.notification.create({ data: { userId: user.id, type, title, message: `${message}\n\nMessage de l'administration` } }))
+        targetUsers.map(user => prisma.notification.create({
+          data: { userId: user.id, type, title, message: `${message}\n\nMessage de l'administration` }
+        }))
       );
 
       return { sent: notifications.length, targetRole, recipients: targetUsers.map(u => u.nomComplet) };

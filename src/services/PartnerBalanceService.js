@@ -1,4 +1,4 @@
-// src/services/PartnerBalanceService.js  — VERSION ENRICHIE
+// src/services/PartnerBalanceService.js  — VERSION ENRICHIE + TRANSACTION DIRECTE ADMIN
 import prisma from '../config/database.js';
 
 class PartnerBalanceService {
@@ -7,8 +7,76 @@ class PartnerBalanceService {
     return Number(value) / 100;
   }
 
+  convertToInt(value) {
+    return Math.round(parseFloat(value) * 100);
+  }
+
+  getActiveTransactionFilter(partenaireId) {
+    return {
+      partenaireId,
+      type: { in: ['DEPOT', 'RETRAIT'] },
+      OR: [{ archived: false }, { archived: null }],
+      NOT: { description: { startsWith: '[SUPPRIMÉ]' } }
+    };
+  }
+
   // ─────────────────────────────────────────────────────────────────
-  // SOLDE SIMPLE (existant — inchangé)
+  // TRANSACTION DIRECTE ADMIN → PARTENAIRE
+  // ❌ Pas de destinataireId superviseur → n'impacte AUCUNE card superviseur
+  // ✅ Apparaît uniquement dans le solde/historique du partenaire
+  // ─────────────────────────────────────────────────────────────────
+
+  async createAdminDirectTransaction(adminId, partenaireId, type, montant) {
+    const partner = await prisma.user.findUnique({
+      where: { id: partenaireId, role: 'PARTENAIRE' },
+      select: { id: true, nomComplet: true, status: true }
+    });
+    if (!partner) throw new Error('Partenaire introuvable');
+    if (partner.status !== 'ACTIVE') throw new Error('Partenaire suspendu');
+
+    const admin = await prisma.user.findUnique({
+      where: { id: adminId, role: 'ADMIN' },
+      select: { id: true, nomComplet: true }
+    });
+    if (!admin) throw new Error('Admin introuvable');
+
+    const montantFloat = parseFloat(montant);
+    if (isNaN(montantFloat) || montantFloat <= 0) throw new Error('Montant invalide');
+
+    const montantInt  = this.convertToInt(montantFloat);
+    const typeUpper   = type === 'depot' ? 'DEPOT' : 'RETRAIT';
+    const description = typeUpper === 'DEPOT'
+      ? `Dépôt direct admin — ${admin.nomComplet}`
+      : `Retrait direct admin — ${admin.nomComplet}`;
+
+    const transaction = await prisma.transaction.create({
+      data: {
+        montant:     montantInt,
+        type:        typeUpper,
+        description,
+        envoyeurId:  adminId,
+        partenaireId,
+        // ← PAS de destinataireId : invisible pour tous les superviseurs
+      },
+      select: {
+        id: true, type: true, montant: true,
+        description: true, createdAt: true
+      }
+    });
+
+    return {
+      id:          transaction.id,
+      type:        transaction.type,
+      montant:     this.convertFromInt(transaction.montant),
+      description: transaction.description,
+      createdAt:   transaction.createdAt,
+      partenaire:  partner.nomComplet,
+      admin:       admin.nomComplet,
+    };
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // SOLDE SIMPLE
   // ─────────────────────────────────────────────────────────────────
 
   async getPartnerBalance(partenaireId) {
@@ -19,7 +87,7 @@ class PartnerBalanceService {
     if (!partner) throw new Error('Partenaire introuvable');
 
     const transactions = await prisma.transaction.findMany({
-      where: { partenaireId, type: { in: ['DEPOT', 'RETRAIT'] } },
+      where: this.getActiveTransactionFilter(partenaireId),
       select: {
         id: true, type: true, montant: true, createdAt: true, archived: true,
         destinataire: { select: { id: true, nomComplet: true } }
@@ -38,7 +106,10 @@ class PartnerBalanceService {
     const etat  = solde > 0 ? 'BOUTIQUE_DOIT' : solde < 0 ? 'PARTENAIRE_DOIT' : 'SOLDE';
 
     return {
-      partenaire: { id: partner.id, nomComplet: partner.nomComplet, telephone: partner.telephone, status: partner.status },
+      partenaire: {
+        id: partner.id, nomComplet: partner.nomComplet,
+        telephone: partner.telephone, status: partner.status
+      },
       solde: {
         montant: solde, montantAbsolu: Math.abs(solde), etat,
         label: etat === 'BOUTIQUE_DOIT'
@@ -61,14 +132,7 @@ class PartnerBalanceService {
   }
 
   // ─────────────────────────────────────────────────────────────────
-  // HISTORIQUE ENRICHI ← NOUVEAU
-  //
-  //  Inclut pour chaque transaction :
-  //    • L'employé qui l'a créée (même si supprimé → status: "DELETED")
-  //    • L'heure exacte
-  //    • La note / référence
-  //    • Statistiques avancées : moyenne, plus gros dépôt/retrait
-  //    • Top employés
+  // HISTORIQUE ENRICHI
   // ─────────────────────────────────────────────────────────────────
 
   async getPartnerHistory(partenaireId) {
@@ -80,15 +144,14 @@ class PartnerBalanceService {
       if (!partner) throw new Error('Partenaire introuvable');
 
       const transactions = await prisma.transaction.findMany({
-        where: { partenaireId, type: { in: ['DEPOT', 'RETRAIT'] } },
+        where: this.getActiveTransactionFilter(partenaireId),
         select: {
-          id:        true,
-          type:      true,
-          montant:   true,
-          createdAt: true,
-          archived:  true,
+          id:          true,
+          type:        true,
+          montant:     true,
+          createdAt:   true,
+          archived:    true,
           description: true,
-          // envoyeur = l'employé (superviseur/admin) qui a saisi la transaction
           envoyeur: {
             select: {
               id:         true,
@@ -101,7 +164,6 @@ class PartnerBalanceService {
         orderBy: { createdAt: 'desc' }
       });
 
-      // ── Calculs solde ──
       let totalDepots = 0, totalRetraits = 0;
       let plusGrosDepot = 0, plusGrosRetrait = 0;
       const montants = [];
@@ -118,23 +180,21 @@ class PartnerBalanceService {
         }
       });
 
-      const solde    = totalDepots - totalRetraits;
-      const etat     = solde > 0 ? 'BOUTIQUE_DOIT' : solde < 0 ? 'PARTENAIRE_DOIT' : 'SOLDE';
-      const moyenne  = montants.length > 0
+      const solde   = totalDepots - totalRetraits;
+      const etat    = solde > 0 ? 'BOUTIQUE_DOIT' : solde < 0 ? 'PARTENAIRE_DOIT' : 'SOLDE';
+      const moyenne = montants.length > 0
         ? montants.reduce((a, b) => a + b, 0) / montants.length
         : 0;
 
-      const sorted    = [...transactions].sort((a, b) =>
+      const sorted   = [...transactions].sort((a, b) =>
         new Date(a.createdAt) - new Date(b.createdAt));
-      const derniere  = transactions[0]?.createdAt ?? null;
-      const premiere  = sorted[0]?.createdAt ?? null;
+      const derniere = transactions[0]?.createdAt ?? null;
+      const premiere = sorted[0]?.createdAt      ?? null;
 
-      // ── Formater les transactions ──
       const txFormatted = transactions.map(tx => {
-        const m = this.convertFromInt(tx.montant);
-
-        // envoyeur = l'employé qui a saisi la transaction
+        const m   = this.convertFromInt(tx.montant);
         const emp = tx.envoyeur ?? null;
+
         let employeStatus = 'ACTIVE';
         if (!emp)                            employeStatus = 'DELETED';
         else if (emp.status === 'SUSPENDED') employeStatus = 'SUSPENDED';
@@ -147,6 +207,8 @@ class PartnerBalanceService {
           archived:  tx.archived ?? false,
           note:      tx.description ?? null,
           reference: null,
+          // Si envoyeur est ADMIN → transaction directe admin
+          isAdminDirect: emp?.role === 'ADMIN',
           superviseur: emp ? {
             id:         emp.id,
             nomComplet: emp.nomComplet,
@@ -194,7 +256,7 @@ class PartnerBalanceService {
   }
 
   // ─────────────────────────────────────────────────────────────────
-  // SOLDES DE TOUS LES PARTENAIRES (existant — inchangé)
+  // SOLDES DE TOUS LES PARTENAIRES
   // ─────────────────────────────────────────────────────────────────
 
   async getAllPartnersBalances() {
@@ -208,7 +270,9 @@ class PartnerBalanceService {
       const allTransactions = await prisma.transaction.findMany({
         where: {
           partenaireId: { in: partners.map(p => p.id) },
-          type: { in: ['DEPOT', 'RETRAIT'] }
+          type: { in: ['DEPOT', 'RETRAIT'] },
+          OR: [{ archived: false }, { archived: null }],
+          NOT: { description: { startsWith: '[SUPPRIMÉ]' } }
         },
         select: { partenaireId: true, type: true, montant: true, createdAt: true }
       });

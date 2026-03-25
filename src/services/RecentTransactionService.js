@@ -249,10 +249,7 @@ class RecentTransactionService {
 
     return {
       id:        tx.id,
-      dateHeure: tx.createdAt.toLocaleString('fr-FR', {
-        day: '2-digit', month: '2-digit', year: 'numeric',
-        hour: '2-digit', minute: '2-digit'
-      }),
+      dateHeure: tx.createdAt.toISOString(),
       intervenant,
       adminNom:  intervenant.role === 'ADMIN' ? adminNom : null,
       type: {
