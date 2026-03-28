@@ -16,6 +16,7 @@ import {
 } from '../middleware/validation.js';
 
 const router = express.Router();
+router.put('/:userId', authenticateToken, UserController.updateUser);
 
 // =====================================
 // ROUTES PUBLIQUES
@@ -30,7 +31,7 @@ router.post('/register-request', validateRegistration, handleValidationErrors, U
 
 router.post('/logout', authenticateToken, UserController.logout);
 router.get('/profile',  authenticateToken, UserController.getProfile);
-router.put('/:userId', authenticateToken, UserController.updateUser);
+
 
 // ✏️ Mise à jour profil — nom, téléphone, adresse, photo (sauf code)
 router.patch('/profile', authenticateToken, UserController.updateProfile);

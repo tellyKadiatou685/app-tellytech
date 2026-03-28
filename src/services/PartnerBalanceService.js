@@ -11,11 +11,13 @@ class PartnerBalanceService {
     return Math.round(parseFloat(value) * 100);
   }
 
+  // ✅ FIX : suppression du filtre archived
+  // L'archivage = mécanisme de reset dashboard uniquement, PAS une suppression
+  // Le filtre [SUPPRIMÉ] suffit pour exclure les vraies suppressions
   getActiveTransactionFilter(partenaireId) {
     return {
       partenaireId,
       type: { in: ['DEPOT', 'RETRAIT'] },
-      OR: [{ archived: false }, { archived: null }],
       NOT: { description: { startsWith: '[SUPPRIMÉ]' } }
     };
   }
@@ -86,6 +88,8 @@ class PartnerBalanceService {
     });
     if (!partner) throw new Error('Partenaire introuvable');
 
+    // ✅ FIX : getActiveTransactionFilter ne filtre plus sur archived
+    // → les transactions archivées (reset) restent visibles dans l'historique
     const transactions = await prisma.transaction.findMany({
       where: this.getActiveTransactionFilter(partenaireId),
       select: {
@@ -143,6 +147,8 @@ class PartnerBalanceService {
       });
       if (!partner) throw new Error('Partenaire introuvable');
 
+      // ✅ FIX : getActiveTransactionFilter ne filtre plus sur archived
+      // → tout l'historique reste visible après le reset quotidien
       const transactions = await prisma.transaction.findMany({
         where: this.getActiveTransactionFilter(partenaireId),
         select: {
@@ -267,11 +273,12 @@ class PartnerBalanceService {
         orderBy: { nomComplet: 'asc' }
       });
 
+      // ✅ FIX : suppression du filtre archived ici aussi
+      // → le solde global reflète TOUTES les transactions, pas seulement celles du jour courant
       const allTransactions = await prisma.transaction.findMany({
         where: {
           partenaireId: { in: partners.map(p => p.id) },
           type: { in: ['DEPOT', 'RETRAIT'] },
-          OR: [{ archived: false }, { archived: null }],
           NOT: { description: { startsWith: '[SUPPRIMÉ]' } }
         },
         select: { partenaireId: true, type: true, montant: true, createdAt: true }
