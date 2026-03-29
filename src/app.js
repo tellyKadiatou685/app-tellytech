@@ -28,6 +28,7 @@ const corsOptions = {
       'http://localhost:3000',
       'http://localhost:8082',
       'http://localhost:8081',
+      
       'http://172.20.10.2:8082'
     ];
     
