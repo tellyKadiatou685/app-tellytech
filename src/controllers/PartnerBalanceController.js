@@ -9,10 +9,11 @@ class PartnerBalanceController {
   async getAllPartnersBalances(req, res) {
     try {
       const results = await PartnerBalanceService.getAllPartnersBalances();
+      // results = { partners: [...], totaux: { depotTotal, retraitTotal, soldeGlobal, ... } }
       res.json({
         success: true,
-        message: `${results.length} solde(s) partenaires récupérés`,
-        data: { partners: results }
+        message: `${results.partners.length} solde(s) partenaires récupérés`,
+        data: results  // ← on passe { partners, totaux } directement
       });
     } catch (error) {
       res.status(500).json({ success: false, message: error.message });

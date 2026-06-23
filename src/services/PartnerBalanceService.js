@@ -540,63 +540,92 @@ class PartnerBalanceService {
   }
 
   // ─────────────────────────────────────────────────────────────────
-  // SOLDES DE TOUS LES PARTENAIRES
-  // ─────────────────────────────────────────────────────────────────
-  async getAllPartnersBalances() {
-    try {
-      const partners = await prisma.user.findMany({
-        where: { role: 'PARTENAIRE' },
-        select: { id: true, nomComplet: true, telephone: true, status: true },
-        orderBy: { nomComplet: 'asc' }
-      });
+// ─────────────────────────────────────────────────────────────────
+// SOLDES DE TOUS LES PARTENAIRES + TOTAUX GLOBAUX
+// ─────────────────────────────────────────────────────────────────
+async getAllPartnersBalances() {
+  try {
+    const partners = await prisma.user.findMany({
+      where: { role: 'PARTENAIRE' },
+      select: { id: true, nomComplet: true, telephone: true, status: true },
+      orderBy: { nomComplet: 'asc' }
+    });
 
-      const allTransactions = await prisma.transaction.findMany({
-        where: {
-          partenaireId: { in: partners.map(p => p.id) },
-          type: { in: ['DEPOT', 'RETRAIT'] },
-          NOT: { description: { startsWith: '[SUPPRIMÉ]' } }
+    const allTransactions = await prisma.transaction.findMany({
+      where: {
+        partenaireId: { in: partners.map(p => p.id) },
+        type: { in: ['DEPOT', 'RETRAIT'] },
+        NOT: { description: { startsWith: '[SUPPRIMÉ]' } }
+      },
+      select: { partenaireId: true, type: true, montant: true, createdAt: true }
+    });
+
+    const txByPartner = {};
+    allTransactions.forEach(tx => {
+      if (!txByPartner[tx.partenaireId])
+        txByPartner[tx.partenaireId] = { depots: 0, retraits: 0, count: 0, derniere: null };
+      const m = this.convertFromInt(tx.montant);
+      if (tx.type === 'DEPOT')   txByPartner[tx.partenaireId].depots   += m;
+      if (tx.type === 'RETRAIT') txByPartner[tx.partenaireId].retraits += m;
+      txByPartner[tx.partenaireId].count++;
+      if (!txByPartner[tx.partenaireId].derniere || tx.createdAt > txByPartner[tx.partenaireId].derniere)
+        txByPartner[tx.partenaireId].derniere = tx.createdAt;
+    });
+
+    const partnersList = partners.map(partner => {
+      const data  = txByPartner[partner.id] ?? { depots: 0, retraits: 0, count: 0, derniere: null };
+      const solde = data.depots - data.retraits;
+      const etat  = solde > 0 ? 'BOUTIQUE_DOIT' : solde < 0 ? 'PARTENAIRE_DOIT' : 'SOLDE';
+      return {
+        id: partner.id, nomComplet: partner.nomComplet,
+        telephone: partner.telephone, status: partner.status,
+        solde: {
+          montant: solde, montantAbsolu: Math.abs(solde), etat,
+          label: etat === 'BOUTIQUE_DOIT'
+            ? `Boutique doit ${Math.abs(solde).toLocaleString('fr-FR')} F`
+            : etat === 'PARTENAIRE_DOIT'
+              ? `Partenaire doit ${Math.abs(solde).toLocaleString('fr-FR')} F`
+              : 'Soldé ✅'
         },
-        select: { partenaireId: true, type: true, montant: true, createdAt: true }
-      });
+        statistiques: {
+          totalDepots: data.depots, totalRetraits: data.retraits,
+          nombreTransactions: data.count, derniereTransaction: data.derniere
+        }
+      };
+    });
 
-      const txByPartner = {};
-      allTransactions.forEach(tx => {
-        if (!txByPartner[tx.partenaireId])
-          txByPartner[tx.partenaireId] = { depots: 0, retraits: 0, count: 0, derniere: null };
-        const m = this.convertFromInt(tx.montant);
-        if (tx.type === 'DEPOT')   txByPartner[tx.partenaireId].depots   += m;
-        if (tx.type === 'RETRAIT') txByPartner[tx.partenaireId].retraits += m;
-        txByPartner[tx.partenaireId].count++;
-        if (!txByPartner[tx.partenaireId].derniere || tx.createdAt > txByPartner[tx.partenaireId].derniere)
-          txByPartner[tx.partenaireId].derniere = tx.createdAt;
-      });
+    // ── Totaux globaux ──────────────────────────────────────────
+    const depotTotal   = partnersList.reduce((acc, p) => acc + p.statistiques.totalDepots,   0);
+    const retraitTotal = partnersList.reduce((acc, p) => acc + p.statistiques.totalRetraits, 0);
+    const soldeGlobal  = depotTotal - retraitTotal;
 
-      return partners.map(partner => {
-        const data  = txByPartner[partner.id] ?? { depots: 0, retraits: 0, count: 0, derniere: null };
-        const solde = data.depots - data.retraits;
-        const etat  = solde > 0 ? 'BOUTIQUE_DOIT' : solde < 0 ? 'PARTENAIRE_DOIT' : 'SOLDE';
-        return {
-          id: partner.id, nomComplet: partner.nomComplet,
-          telephone: partner.telephone, status: partner.status,
-          solde: {
-            montant: solde, montantAbsolu: Math.abs(solde), etat,
-            label: etat === 'BOUTIQUE_DOIT'
-              ? `Boutique doit ${Math.abs(solde).toLocaleString('fr-FR')} F`
-              : etat === 'PARTENAIRE_DOIT'
-                ? `Partenaire doit ${Math.abs(solde).toLocaleString('fr-FR')} F`
-                : 'Soldé ✅'
-          },
-          statistiques: {
-            totalDepots: data.depots, totalRetraits: data.retraits,
-            nombreTransactions: data.count, derniereTransaction: data.derniere
-          }
-        };
-      });
-    } catch (error) {
-      console.error('❌ [PARTNER BALANCE] getAllPartnersBalances:', error.message);
-      throw error;
-    }
+    const etatGlobal = soldeGlobal > 0
+      ? 'BOUTIQUE_DOIT'       // la boutique doit de l'argent aux partenaires
+      : soldeGlobal < 0
+        ? 'PARTENAIRE_DOIT'   // les partenaires doivent à la boutique
+        : 'SOLDE';
+
+    return {
+      partners: partnersList,
+      totaux: {
+        depotTotal,
+        retraitTotal,
+        soldeGlobal,
+        soldeGlobalAbsolu: Math.abs(soldeGlobal),
+        etat: etatGlobal,
+        label: etatGlobal === 'BOUTIQUE_DOIT'
+          ? `La boutique doit ${Math.abs(soldeGlobal).toLocaleString('fr-FR')} F aux partenaires`
+          : etatGlobal === 'PARTENAIRE_DOIT'
+            ? `Les partenaires doivent ${Math.abs(soldeGlobal).toLocaleString('fr-FR')} F`
+            : 'Tout est soldé ✅'
+      }
+    };
+
+  } catch (error) {
+    console.error('❌ [PARTNER BALANCE] getAllPartnersBalances:', error.message);
+    throw error;
   }
+}
 }
 
 export default new PartnerBalanceService();
